@@ -35,7 +35,7 @@ export default function ImageClassifier() {
     formData.append('file', file);
 
     try {
-      const response = await axios.post<PredictionResult>('http://localhost:5000/predict', formData, {
+      const response = await axios.post<PredictionResult>('http://0.0.0.0:5000/predict', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setResult(response.data);
