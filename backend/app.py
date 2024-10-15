@@ -6,17 +6,24 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-# Define the is_recyclable function
+# Define the is_recyclable function used in model training
 def is_recyclable(file_path):
     recyclable = ['cardboard', 'glass', 'metal', 'paper', 'plastic']
     category = file_path.parent.name
     return 'recyclable' if category in recyclable else 'non_recyclable'
 
 # Load the saved model
-learn = load_learner('./export.pkl', cpu=True)
+try:
+    learn = load_learner('./export.pkl', cpu=True)
+except RuntimeError as e:
+    print(f"Error loading the model: {e}")
+    learn = None
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    if learn is None:
+        return jsonify({'error': 'Model not loaded properly'}), 500
+
     if 'file' not in request.files:
         return jsonify({'error': 'No file part in the request'}), 400
     
@@ -25,7 +32,7 @@ def predict():
     if file.filename == '':
         return jsonify({'error': 'No file selected for uploading'}), 400
     
-    if file:
+    try:
         # Read the image file
         img_bytes = file.read()
         img = PILImage.create(img_bytes)
@@ -45,7 +52,8 @@ def predict():
             'confidence': confidence,
             'recycling_status': recycling_status
         })
-
+    except Exception as e:
+        return jsonify({'error': f'Error processing the image: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True)
