@@ -35,10 +35,17 @@ def predict():
         
         confidence = float(probs[pred_idx])
         
+        # Check if the predicted class is recyclable
+        recyclable = ['cardboard', 'glass', 'metal', 'paper', 'plastic']
+        category = str(pred_class)
+        recycling_status = 'recyclable' if category in recyclable else 'non_recyclable'
+        
         return jsonify({
-            'prediction': str(pred_class),
-            'confidence': confidence
+            'prediction': category,
+            'confidence': confidence,
+            'recycling_status': recycling_status
         })
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True)
