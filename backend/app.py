@@ -1,56 +1,55 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from fastai.vision.all import *
+import torch
 import os
+from torchvision import transforms, models
+from PIL import Image
 
 app = Flask(__name__)
 CORS(app)
 
-# Define the is_recyclable function used in model training
-def is_recyclable(file_path):
-    recyclable = ['cardboard', 'glass', 'metal', 'paper', 'plastic']
-    category = file_path.parent.name
-    return 'recyclable' if category in recyclable else 'non_recyclable'
+# Load the model
+device = torch.device("cpu")
+model = models.resnet34(pretrained=False)
+num_ftrs = model.fc.in_features
+model.fc = torch.nn.Linear(num_ftrs, 2)  # Binary classification (recyclable/non-recyclable)
+model.load_state_dict(torch.load('model.pth', map_location=device))
+model.eval()
 
-# Load the saved model
-try:
-    learn = load_learner('./export.pkl', cpu=True)
-except RuntimeError as e:
-    print(f"Error loading the model: {e}")
-    learn = None
+# Define transform
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+])
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    if learn is None:
-        return jsonify({'error': 'Model not loaded properly'}), 500
-
     if 'file' not in request.files:
         return jsonify({'error': 'No file part in the request'}), 400
-    
+
     file = request.files['file']
     
     if file.filename == '':
         return jsonify({'error': 'No file selected for uploading'}), 400
     
     try:
-        # Read the image file
-        img_bytes = file.read()
-        img = PILImage.create(img_bytes)
-        
+        # Read the image file and prepare it for prediction
+        img = Image.open(file.stream)
+        img = transform(img).unsqueeze(0)
+
         # Make prediction
-        pred_class, pred_idx, probs = learn.predict(img)
-        
-        confidence = float(probs[pred_idx])
-        
-        # Check if the predicted class is recyclable
-        recyclable = ['cardboard', 'glass', 'metal', 'paper', 'plastic']
-        category = str(pred_class)
-        recycling_status = 'recyclable' if category in recyclable else 'non_recyclable'
-        
+        with torch.no_grad():
+            outputs = model(img)
+            _, predicted = torch.max(outputs, 1)
+
+        # Map the prediction to a label
+        recyclable = ['recyclable', 'non_recyclable']
+        category = recyclable[predicted.item()]
+
         return jsonify({
             'prediction': category,
-            'confidence': confidence,
-            'recycling_status': recycling_status
+            'confidence': float(torch.nn.functional.softmax(outputs, dim=1)[0][predicted.item()])
         })
     except Exception as e:
         return jsonify({'error': f'Error processing the image: {str(e)}'}), 500
