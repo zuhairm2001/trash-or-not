@@ -23,7 +23,6 @@ export default function ImageClassifier() {
       setError(null);
     }
   };
-
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!file) return;
@@ -35,17 +34,36 @@ export default function ImageClassifier() {
     formData.append('file', file);
 
     try {
-      const response = await axios.post<PredictionResult>('/predict', formData, {
+      const response = await axios.post<PredictionResult>('http://0.0.0.0:5000/predict', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30000, // Add timeout
+        validateStatus: (status) => status === 200, // Only accept 200
       });
+      
+      if (response.data.confidence < 0.5) {
+        setError('Low confidence prediction. Please try with a clearer image.');
+        return;
+      }
+      
       setResult(response.data);
     } catch (err) {
-      setError('An error occurred while processing the image. Please try again.');
+      if (axios.isAxiosError(err)) {
+        if (err.response?.status === 400) {
+          setError('Invalid image format or size. Please try another image.');
+        } else if (err.response?.status === 413) {
+          setError('Image file is too large. Please use a smaller image.');
+        } else if (err.code === 'ECONNABORTED') {
+          setError('Request timed out. Please try again.');
+        } else {
+          setError('An error occurred while processing the image. Please try again.');
+        }
+      }
       console.error(err);
     } finally {
       setLoading(false);
     }
   };
+
 
   const handleRetake = () => {
     setFile(null);

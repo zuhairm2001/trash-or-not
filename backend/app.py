@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import torch
+import torch.nn as nn
 import os
 from torchvision import transforms, models
 from PIL import Image
@@ -10,13 +11,30 @@ CORS(app)
 
 # Load the model
 device = torch.device("cpu")
-model = models.resnet34(pretrained=False)
+model = models.resnet34(weights=None)
 num_ftrs = model.fc.in_features
-model.fc = torch.nn.Linear(num_ftrs, 2)  # Binary classification (recyclable/non-recyclable)
-model.load_state_dict(torch.load('model.pth', map_location=device))
+
+# Match the architecture used during training with 6 output classes
+model.fc = nn.Sequential(
+    nn.Dropout(0.5),
+    nn.Linear(num_ftrs, 6)  # 6 classes from TrashNet dataset
+)
+
+# Load state dict
+state_dict = torch.load('best_model.pth', map_location=device, weights_only=True)
+fixed_state_dict = {}
+for key in state_dict:
+    if key.startswith('resnet.'):
+        # Remove the 'resnet.' prefix
+        fixed_key = key[7:]
+        fixed_state_dict[fixed_key] = state_dict[key]
+    else:
+        fixed_state_dict[key] = state_dict[key]
+
+model.load_state_dict(fixed_state_dict)
 model.eval()
 
-# Define transform
+# Define transform - same as used in training
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
@@ -41,15 +59,25 @@ def predict():
         # Make prediction
         with torch.no_grad():
             outputs = model(img)
-            _, predicted = torch.max(outputs, 1)
+            probabilities = torch.nn.functional.softmax(outputs, dim=1)[0]
+            prediction_idx = torch.argmax(outputs, dim=1).item()
+            confidence = float(probabilities[prediction_idx])
 
-        # Map the prediction to a label
-        recyclable = ['recyclable', 'non_recyclable']
-        category = recyclable[predicted.item()]
+        # Original categories from the model
+        categories = ['cardboard', 'glass', 'metal', 'paper', 'plastic', 'trash']
+        original_prediction = categories[prediction_idx]
+        
+        # Map to recyclable/non-recyclable
+        is_recyclable = original_prediction != 'trash'
+        prediction = 'recyclable' if is_recyclable else 'non_recyclable'
 
+        # If it's recyclable, keep the same confidence
+        # If it's non-recyclable (trash), keep the same confidence
+        
+        # Return response matching the frontend's PredictionResult interface
         return jsonify({
-            'prediction': category,
-            'confidence': float(torch.nn.functional.softmax(outputs, dim=1)[0][predicted.item()])
+            'prediction': prediction,
+            'confidence': confidence  # This will be a float between 0 and 1
         })
     except Exception as e:
         return jsonify({'error': f'Error processing the image: {str(e)}'}), 500
